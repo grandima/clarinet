@@ -525,6 +525,7 @@ impl<'a> ASTVisitor<'a> for CheckChecker<'a> {
         expr: &'a SymbolicExpression,
         inner: &'a SymbolicExpression,
     ) -> bool {
+        println!("***** traverse_as_contract");
         self.in_as_contract = true;
         let res = self.traverse_expr(inner) && self.visit_as_contract(expr, inner);
         self.in_as_contract = false;
@@ -879,6 +880,8 @@ fn match_contract_caller(expr: &SymbolicExpression) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
+
     use crate::analysis::Pass;
     use crate::repl::session::Session;
     use crate::repl::SessionSettings;
@@ -1664,18 +1667,34 @@ mod tests {
         let mut settings = SessionSettings::default();
         settings.repl_settings.analysis.passes = vec![Pass::CheckChecker];
         let mut session = Session::new(settings);
-        let snippet = "
-(define-fungible-token stackaroo)
-(define-public (tainted-ft-burn (amount uint))
-    (begin
-        (try! (ft-burn? stackaroo amount (as-contract tx-sender)))
-        (as-contract (ft-burn? stackaroo amount tx-sender))
-    )
-)
-"
-        .to_string();
-        match session.formatted_interpretation(snippet, Some("checker".to_string()), false, None) {
+        let snippet = indoc!(
+            r#"(define-fungible-token stackaroo)
+            (define-public (tainted-ft-burn (amount uint))
+                (begin
+                    (try! (ft-burn? stackaroo amount (as-contract tx-sender)))
+                    (as-contract (ft-burn? stackaroo amount tx-sender))
+                )
+            )
+            "#
+        );
+
+        // output: [
+        //     "checker:4:35: \u{1b}[1;33mwarning:\u{1b}[0m use of potentially unchecked data",
+        //     "        (try! (ft-burn? stackaroo amount (as-contract tx-sender)))",
+        //     "                                  ^~~~~~",
+        //     "checker:2:34: \u{1b}[1;34mnote:\u{1b}[0m source of untrusted input here",
+        //     "(define-public (tainted-ft-burn (amount uint))",
+        //     "                                 ^~~~~~",
+        // ]
+
+        match session.formatted_interpretation(
+            snippet.to_string(),
+            Some("checker".to_string()),
+            false,
+            None,
+        ) {
             Ok((output, _)) => {
+                println!("output: {:#?}", output);
                 assert_eq!(output.len(), 12);
                 assert_eq!(
                     output[0],
